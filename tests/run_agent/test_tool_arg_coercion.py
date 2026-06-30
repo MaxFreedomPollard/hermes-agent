@@ -60,6 +60,20 @@ class TestCoerceNumber:
     def test_large_number(self):
         assert _coerce_number("1000000") == 1000000
 
+    def test_large_integer_preserves_precision(self):
+        """Integers beyond 2**53 (64-bit Discord/Telegram snowflake IDs, large
+        DB row IDs) must round-trip exactly. int(float(value)) would silently
+        round them, so a tool would act on the wrong id."""
+        snowflake = "1234567890123456789"
+        result = _coerce_number(snowflake, integer_only=True)
+        assert result == 1234567890123456789
+        assert str(result) == snowflake
+
+        edge = "9007199254740993"  # 2**53 + 1
+        assert _coerce_number(edge, integer_only=True) == 9007199254740993
+        # The same must hold for an unconstrained "number" field.
+        assert _coerce_number(snowflake) == 1234567890123456789
+
     def test_scientific_notation(self):
         assert _coerce_number("1e5") == 100000
 

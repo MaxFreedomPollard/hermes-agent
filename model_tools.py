@@ -810,6 +810,14 @@ def _coerce_json(value: str, expected_python_type: type):
 
 def _coerce_number(value: str, integer_only: bool = False):
     """Try to parse *value* as a number.  Returns original string on failure."""
+    # Plain integer literals go through int() to preserve full precision.
+    # int(float(value)) silently rounds integers beyond 2**53 (e.g. 64-bit
+    # Discord/Telegram snowflake IDs or large DB row IDs the model emits as a
+    # string), corrupting the value the tool receives.
+    try:
+        return int(value.strip())
+    except (ValueError, TypeError):
+        pass
     try:
         f = float(value)
     except (ValueError, OverflowError):
