@@ -373,6 +373,7 @@ AUTHOR_MAP = {
     "alfred@my-cloud.me": "alfred-smith-0",
     "tangtaizhong792@gmail.com": "tangtaizong666",
     "github@aldo.pw": "aldoeliacim",
+    "c60limited@gmail.com": "MaxFreedomPollard",
     "max@c60spaceship.com": "MaxFreedomPollard",
     "achaljhawar03@gmail.com": "achaljhawar",
     "claytonchew@ClaytonMacMiniM4.local": "claytonchew",
