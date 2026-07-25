@@ -244,6 +244,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   const { connectionRef, gateway, gatewayRef, requestGateway } = useGatewayRequest()
 
   const {
+    clearAllSessions,
     loadMoreMessagingForPlatform,
     loadMoreSessions,
     loadMoreSessionsForProfile,
@@ -460,6 +461,26 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     syncSessionStateToView,
     updateSessionState
   })
+
+  // "Delete all chats" from the sidebar: tear the open chat down to a fresh
+  // draft first (so the route effect can't resume a session we're deleting),
+  // then clear the scope's history and close the orphaned runtime - the same
+  // teardown removeSession does for a single chat, lifted to the whole list.
+  const clearAllChats = useCallback(async () => {
+    const closingRuntimeId = activeSessionId
+
+    if (selectedStoredSessionId) {
+      startFreshSessionDraft(true)
+    }
+
+    try {
+      await clearAllSessions()
+    } finally {
+      if (closingRuntimeId) {
+        await requestGateway('session.close', { session_id: closingRuntimeId }).catch(() => undefined)
+      }
+    }
+  }, [activeSessionId, clearAllSessions, requestGateway, selectedStoredSessionId, startFreshSessionDraft])
 
   // A profile switch/create drops to a fresh new-session draft so the
   // previously open session doesn't bleed across contexts. Skip initial value.
@@ -852,6 +873,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     onBranchInNewChat: messageId => void branchInNewChat(messageId),
     onBranchSession: sessionId => void branchStoredSession(sessionId),
     onCancel: cancelRun,
+    onDeleteAllSessions: clearAllChats,
     onDeleteSelectedSession: () => {
       const id = $selectedStoredSessionId.get()
 
