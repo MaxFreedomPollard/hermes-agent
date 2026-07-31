@@ -9504,6 +9504,21 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         except Exception:
             return False
 
+    def _dispatch_busy_command_inline(
+        self, text: str, has_images: bool = False
+    ) -> bool:
+        """Dispatch commands that must bypass the blocked input queue."""
+        should_dispatch = self._should_handle_steer_command_inline(
+            text, has_images=has_images
+        ) or self._should_handle_background_command_inline(
+            text, has_images=has_images
+        )
+        if not should_dispatch:
+            return False
+
+        self.process_command(text)
+        return True
+
     def _output_console(self):
         """Use prompt_toolkit-safe Rich rendering once the TUI is live."""
         if getattr(self, "_app", None):
@@ -15031,39 +15046,12 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                     event.app.invalidate()
                     return
 
-                # Handle /steer while the agent is running immediately on the
-                # UI thread.  Queuing through _pending_input would deadlock the
-                # steer until after the agent loop finishes (process_loop is
-                # blocked inside self.chat()), which turns /steer into a
-                # post-run next-turn message — defeating mid-run injection.
-                # agent.steer() is thread-safe (holds _pending_steer_lock).
-                if self._should_handle_steer_command_inline(text, has_images=has_images):
-                    self.process_command(text)
+                # /steer and /background must bypass _pending_input while the
+                # foreground turn blocks process_loop inside self.chat().
+                if self._dispatch_busy_command_inline(text, has_images=has_images):
                     event.app.current_buffer.reset(append_to_history=True)
-                    # Force a repaint after clearing the buffer.  /steer is
-                    # dispatched mid-run while the agent streams output through
-                    # patch_stdout; process_command() never invalidates the
-                    # app, so without this the submitted "/steer <text>" can
-                    # linger in the input area (looking unsent) and invite an
-                    # accidental re-submit. See issue #34569.
-                    event.app.invalidate()
-                    return
-
-                # Same treatment for /background (/bg, /btw) while the agent is
-                # running.  Queuing it defeats the entire point of the command:
-                # process_loop is blocked inside self.chat(), so the background
-                # task would only start once the foreground turn it was meant to
-                # run alongside has already finished (#75221).  The foreground
-                # turn is left alone: no interrupt, no steer.
-                if self._should_handle_background_command_inline(
-                    text, has_images=has_images
-                ):
-                    self.process_command(text)
-                    event.app.current_buffer.reset(append_to_history=True)
-                    # Repaint for the same reason as the /steer branch above:
-                    # process_command() prints through patch_stdout and never
-                    # invalidates the app, so the submitted text can linger in
-                    # the input area looking unsent.
+                    # process_command() prints through patch_stdout and does not
+                    # invalidate the app, so repaint after clearing the buffer.
                     event.app.invalidate()
                     return
 
