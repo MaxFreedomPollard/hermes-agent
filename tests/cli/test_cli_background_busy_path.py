@@ -14,14 +14,16 @@ the UI thread; the command's own ``CommandDef`` already declares
 ``busy_policy="dispatch"``, which the gateway honours and the classic CLI
 never consulted.
 
-These tests exercise the detector without starting a prompt_toolkit app,
-mirroring tests/cli/test_cli_steer_busy_path.py.
+The detector tests avoid starting a prompt_toolkit app. The routing regression
+exercises the small helper called by the Enter handler and keeps a simulated
+foreground turn blocked until after inline dispatch is observed.
 """
 
 from __future__ import annotations
 
 import importlib
 import sys
+from threading import Event, Thread
 from unittest.mock import MagicMock, patch
 
 
@@ -112,6 +114,40 @@ class TestBackgroundInlineDetector:
         cli = _make_cli()
         cli._agent_running = True
         assert cli._should_handle_background_command_inline("/BG do work") is True
+
+
+class TestBackgroundBusyPathDispatch:
+    def test_dispatches_before_blocking_foreground_turn_finishes(self):
+        cli = _make_cli()
+        cli._pending_input = MagicMock()
+        cli.agent = MagicMock()
+        cli._handle_background_command = MagicMock()
+        foreground_started = Event()
+        foreground_release = Event()
+
+        def run_foreground_turn():
+            cli._agent_running = True
+            foreground_started.set()
+            foreground_release.wait(timeout=5)
+            cli._agent_running = False
+
+        foreground_thread = Thread(target=run_foreground_turn)
+        foreground_thread.start()
+        assert foreground_started.wait(timeout=1)
+
+        try:
+            assert cli._dispatch_busy_command_inline("/bg inspect failures") is True
+
+            cli._handle_background_command.assert_called_once_with(
+                "/bg inspect failures"
+            )
+            cli._pending_input.put.assert_not_called()
+            cli.agent.steer.assert_not_called()
+            cli.agent.interrupt.assert_not_called()
+            assert foreground_thread.is_alive()
+        finally:
+            foreground_release.set()
+            foreground_thread.join(timeout=1)
 
 
 class TestBackgroundBusyPolicyContract:
