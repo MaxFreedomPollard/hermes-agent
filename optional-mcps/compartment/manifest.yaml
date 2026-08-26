@@ -35,10 +35,11 @@ transport:
     - "serve"
 
 # Pinned per catalog dependency policy: full commit SHA. This SHA is the
-# v4.8.0 release (2026-08-20, the current release: memory expiry, panel
-# app can run the whole setup, integrate writes absolute paths); it passes
-# the policy's two-week age line on 2026-09-03. Bumping the pin is a PR to
-# this manifest.
+# v4.8.0 release (2026-08-20: memory expiry, panel app can run the whole
+# setup, integrate writes absolute paths); it passes the policy's two-week
+# age line on 2026-09-03. The current release is v4.9.2 (2026-08-26), a
+# hardening release for the vault's unlock-credential path, pin-eligible
+# 2026-09-09. Bumping the pin is a PR to this manifest.
 #
 # The bootstrap is POSIX-shaped (same as the n8n entry): macOS and Linux
 # install through it as-is. Windows has no `python3`/`.venv/bin`, so
