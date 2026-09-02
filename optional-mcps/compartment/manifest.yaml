@@ -37,9 +37,13 @@ transport:
 # Pinned per catalog dependency policy: full commit SHA. This SHA is the
 # v4.8.0 release (2026-08-20: memory expiry, panel app can run the whole
 # setup, integrate writes absolute paths); it passes the policy's two-week
-# age line on 2026-09-03. The current release is v4.9.2 (2026-08-26), a
-# hardening release for the vault's unlock-credential path, pin-eligible
-# 2026-09-09. Bumping the pin is a PR to this manifest.
+# age line on 2026-09-03. The current release is v4.9.4 (2026-09-02): the
+# memory graph names every entity, the panel gains a Dashboard button, and
+# the server runs under mcp 1.x and 2.x from one wheel (mcp 2.0 removed
+# mcp.server.fastmcp; the import now follows whichever module the installed
+# SDK has, so this bootstrap's `pip install .` resolves against any current
+# mcp). v4.9.4 is pin-eligible 2026-09-16. Bumping the pin is a PR to this
+# manifest.
 #
 # The bootstrap is POSIX-shaped (same as the n8n entry): macOS and Linux
 # install through it as-is. Windows has no `python3`/`.venv/bin`, so
