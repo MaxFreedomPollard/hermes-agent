@@ -68,11 +68,7 @@ gateway:
     always_plural:         "✅ Commandes approuvées (modèle approuvé de manière permanente) ({count} commandes). L'agent reprend..."
 
   auto_reset:
-    notice:                "◐ Session réinitialisée automatiquement ({reason}). Historique de conversation effacé.\nUtilisez /resume pour parcourir et restaurer une session précédente.\nAjustez le délai de réinitialisation dans config.yaml sous session_reset."
-    reason_suspended:      "la session précédente a été arrêtée ou interrompue"
-    reason_resume_pending_expired: "la récupération après le redémarrage de la passerelle a expiré"
-    reason_daily:          "planification quotidienne à {hour}:00"
-    reason_idle:           "inactive depuis {duration}"
+    notice:                "◐ Session réinitialisée après un arrêt. Historique de conversation effacé.\nUtilisez /resume pour parcourir et restaurer une session précédente.\n"
 
   background:
     usage:                 "Usage : /bg <prompt>\nExemple : /bg Résume les meilleures histoires HN d'aujourd'hui\n\nExécute le prompt dans une session séparée. Vous pouvez continuer à discuter — le résultat apparaîtra ici une fois terminé."
