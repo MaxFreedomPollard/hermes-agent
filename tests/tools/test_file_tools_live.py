@@ -273,6 +273,7 @@ class TestTerminalOutputCleanliness:
         """This is how _has_command works -- must return clean 'yes'."""
         result = env.execute("command -v cat >/dev/null 2>&1 && echo 'yes'")
         assert result["output"].strip() == "yes"
+        _assert_clean(result["output"])
 
 
 # ── patch_replace wrong-region regression (PR #54572 / #54575) ──────────
