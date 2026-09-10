@@ -60,11 +60,7 @@ gateway:
     ctx_source_detected:   "مكتشف تلقائيًا"
 
   auto_reset:
-    notice:                "◐ تمت إعادة تعيين الجلسة تلقائيًا ({reason}). تم مسح سجل المحادثة.\nاستخدم /resume لتصفّح جلسة سابقة واستعادتها.\nيمكن ضبط توقيت إعادة التعيين في config.yaml ضمن session_reset."
-    reason_suspended:      "تم إيقاف الجلسة السابقة أو مقاطعتها"
-    reason_resume_pending_expired: "انتهت مهلة الاستعادة بعد إعادة تشغيل البوابة"
-    reason_daily:          "الجدول اليومي عند الساعة {hour}:00"
-    reason_idle:           "غير نشطة منذ {duration}"
+    notice:                "◐ تمت إعادة تعيين الجلسة بعد إيقافها. تم مسح سجل المحادثة.\nاستخدم /resume لتصفّح جلسة سابقة واستعادتها.\n"
 
   model:
     error_prefix:           "خطأ: {error}"

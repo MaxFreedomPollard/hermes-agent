@@ -68,11 +68,7 @@ gateway:
     always_plural:         "✅ Komutlar onaylandı (desen kalıcı olarak onaylandı) ({count} komut). Ajan devam ediyor..."
 
   auto_reset:
-    notice:                "◐ Oturum otomatik olarak sıfırlandı ({reason}). Konuşma geçmişi temizlendi.\nÖnceki bir oturumu görüntülemek ve geri yüklemek için /resume kullanın.\nSıfırlama zamanlamasını config.yaml içindeki session_reset altından ayarlayabilirsiniz."
-    reason_suspended:      "önceki oturum durduruldu veya kesintiye uğradı"
-    reason_resume_pending_expired: "ağ geçidi yeniden başlatma kurtarması zaman aşımına uğradı"
-    reason_daily:          "günlük zamanlama, saat {hour}:00"
-    reason_idle:           "{duration} boyunca etkin değil"
+    notice:                "◐ Oturum durdurulduktan sonra sıfırlandı. Konuşma geçmişi temizlendi.\nÖnceki bir oturumu görüntülemek ve geri yüklemek için /resume kullanın.\n"
 
   background:
     usage:                 "Kullanım: /bg <prompt>\nÖrnek: /bg Bugünün öne çıkan HN haberlerini özetle\n\nİstemi ayrı bir oturumda çalıştırır. Sohbete devam edebilirsin — sonuç tamamlandığında burada görünecek."

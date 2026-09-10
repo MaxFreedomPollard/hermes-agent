@@ -68,11 +68,7 @@ gateway:
     always_plural:         "✅ Parancsok jóváhagyva (minta véglegesen jóváhagyva) ({count} parancs). Az ügynök folytatja..."
 
   auto_reset:
-    notice:                "◐ A munkamenet automatikusan visszaállt ({reason}). A beszélgetés előzményei törölve.\nHasználd a /resume parancsot egy korábbi munkamenet böngészéséhez és visszaállításához.\nA visszaállítás időzítése a config.yaml session_reset szakaszában módosítható."
-    reason_suspended:      "az előző munkamenet leállt vagy megszakadt"
-    reason_resume_pending_expired: "az átjáró újraindítása utáni helyreállítás túllépte az időt"
-    reason_daily:          "napi ütemezés {hour}:00-kor"
-    reason_idle:           "{duration} ideje inaktív"
+    notice:                "◐ A munkamenet leállás után visszaállt. A beszélgetés előzményei törölve.\nHasználd a /resume parancsot egy korábbi munkamenet böngészéséhez és visszaállításához.\n"
 
   background:
     usage:                 "Használat: /bg <prompt>\nPélda: /bg Foglald össze a mai legjobb HN sztorikat\n\nKülön munkamenetben futtatja a promptot. Folytathatod a beszélgetést — az eredmény itt jelenik meg, amint elkészül."
