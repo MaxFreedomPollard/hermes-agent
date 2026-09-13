@@ -273,3 +273,47 @@ class TestCliBrandingHelpers:
         overrides = get_prompt_toolkit_style_overrides()
         assert overrides["status-bar"] == f"bg:{skin.get_color('status_bar_bg')} {skin.get_color('banner_text')}"
         assert overrides["voice-status"] == f"bg:{skin.get_color('voice_status_bg')} {skin.get_color('ui_label')}"
+
+
+class TestSkinAppliesOutsideTheCLI:
+    """``display.skin`` must reach every process, not only the interactive CLI.
+
+    ``init_skin_from_config()`` is called from ``cli.py`` and ``tui_gateway/change_watcher.py``
+    and nowhere else, and ``get_active_skin()`` lazily resolved the configured skin only for
+    routed/multiplex homes — so a gateway or cron process kept ``_active_skin_name = "default"``
+    and silently ignored the user's skin (#36040).
+    """
+
+    @staticmethod
+    def _home_with_skin(monkeypatch, tmp_path, skin):
+        """A temp HERMES_HOME whose config.yaml selects ``skin`` (or none when falsy)."""
+        import yaml
+
+        home = tmp_path / ".hermes"
+        home.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        config = {"display": {"skin": skin}} if skin else {"display": {}}
+        (home / "config.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+        return home
+
+    def test_configured_skin_applies_without_any_cli_init(self, monkeypatch, tmp_path):
+        """No init_skin_from_config() call anywhere: the config still decides."""
+        from hermes_cli.skin_engine import get_active_skin, get_active_skin_name
+
+        self._home_with_skin(monkeypatch, tmp_path, "ares")
+
+        assert get_active_skin().name == "ares"
+        assert get_active_skin_name() == "ares"
+
+    def test_explicit_choice_wins_and_no_config_stays_default(self, monkeypatch, tmp_path):
+        """The lazy resolve must not override an explicit skin, nor invent one."""
+        from hermes_cli import skin_engine
+        from hermes_cli.skin_engine import get_active_skin, set_active_skin
+
+        self._home_with_skin(monkeypatch, tmp_path, "ares")
+        set_active_skin("mono")
+        assert get_active_skin().name == "mono"
+
+        skin_engine._active_skin, skin_engine._active_skin_name = None, "default"
+        self._home_with_skin(monkeypatch, tmp_path / "unskinned", None)
+        assert get_active_skin().name == "default"
