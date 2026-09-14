@@ -305,15 +305,37 @@ class TestSkinAppliesOutsideTheCLI:
         assert get_active_skin().name == "ares"
         assert get_active_skin_name() == "ares"
 
-    def test_explicit_choice_wins_and_no_config_stays_default(self, monkeypatch, tmp_path):
-        """The lazy resolve must not override an explicit skin, nor invent one."""
-        from hermes_cli import skin_engine
+    def test_user_yaml_skin_applies_without_any_cli_init(self, monkeypatch, tmp_path):
+        """The reported symptom: a user skin file, not a built-in, ignored in a cold process."""
+        import yaml
+        from hermes_cli.skin_engine import get_active_skin
+
+        home = self._home_with_skin(monkeypatch, tmp_path, "lunabot")
+        skins = home / "skins"
+        skins.mkdir(parents=True, exist_ok=True)
+        (skins / "lunabot.yaml").write_text(
+            yaml.safe_dump({"name": "lunabot", "description": "user skin",
+                            "branding": {"agent_name": "Lunabot"}}),
+            encoding="utf-8",
+        )
+
+        skin = get_active_skin()
+        assert skin.name == "lunabot"
+        assert skin.get_branding("agent_name", "") == "Lunabot"
+
+    def test_explicit_choice_wins(self, monkeypatch, tmp_path):
+        """The lazy resolve must not override an explicit set_active_skin()."""
         from hermes_cli.skin_engine import get_active_skin, set_active_skin
 
         self._home_with_skin(monkeypatch, tmp_path, "ares")
         set_active_skin("mono")
+
         assert get_active_skin().name == "mono"
 
-        skin_engine._active_skin, skin_engine._active_skin_name = None, "default"
-        self._home_with_skin(monkeypatch, tmp_path / "unskinned", None)
+    def test_unconfigured_stays_default(self, monkeypatch, tmp_path):
+        """With nothing configured the resolve must not invent a skin."""
+        from hermes_cli.skin_engine import get_active_skin
+
+        self._home_with_skin(monkeypatch, tmp_path, None)
+
         assert get_active_skin().name == "default"
