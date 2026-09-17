@@ -20,7 +20,7 @@ source: https://github.com/MaxFreedomPollard/Compartment
 # the agent stores, and starting memories never carry an expiry.
 #
 # Live-verified at the pinned SHA: clean clone + this exact bootstrap, then
-# an MCP probe over stdio. initialize returns serverInfo compartment 4.8.0,
+# an MCP probe over stdio. initialize returns serverInfo compartment 4.9.5,
 # tools/list returns all 14 tools, and a store/search round-trip on a
 # scratch vault recalls the stored memory. The server also starts and lists
 # tools before a vault exists; memory tools answer with lock-state guidance
@@ -35,15 +35,15 @@ transport:
     - "serve"
 
 # Pinned per catalog dependency policy: full commit SHA. This SHA is the
-# v4.8.0 release (2026-08-20: memory expiry, panel app can run the whole
-# setup, integrate writes absolute paths); it passes the policy's two-week
-# age line on 2026-09-03. The current release is v4.9.4 (2026-09-02): the
-# memory graph names every entity, the panel gains a Dashboard button, and
-# the server runs under mcp 1.x and 2.x from one wheel (mcp 2.0 removed
-# mcp.server.fastmcp; the import now follows whichever module the installed
-# SDK has, so this bootstrap's `pip install .` resolves against any current
-# mcp). v4.9.4 is pin-eligible 2026-09-16. Bumping the pin is a PR to this
-# manifest.
+# v4.9.5 release (2026-09-03), the newest release past the policy's
+# two-week age line on the day of this pin (2026-09-17). Since the v4.8.0
+# pin it replaced: the memory graph names every entity, the panel gains a
+# Dashboard button, and the server runs under mcp 1.x and 2.x from one
+# wheel (mcp 2.0 removed mcp.server.fastmcp; the import follows whichever
+# module the installed SDK has). This bootstrap's `pip install .` at this
+# SHA resolved mcp 2.2.0 and the probe below ran on it. The current release
+# is v4.10.0 (2026-09-16), pin-eligible 2026-09-30. Bumping the pin is a PR
+# to this manifest.
 #
 # The bootstrap is POSIX-shaped (same as the n8n entry): macOS and Linux
 # install through it as-is. Windows has no `python3`/`.venv/bin`, so
@@ -52,7 +52,7 @@ transport:
 install:
   type: git
   url: https://github.com/MaxFreedomPollard/Compartment.git
-  ref: 77f08e490477068f6ff8348f6d29e998118fea2d
+  ref: 15c3e25547c237bfc253e340a627d9af59b0b984
   bootstrap:
     - "python3 -m venv .venv"
     - ".venv/bin/pip install ."
