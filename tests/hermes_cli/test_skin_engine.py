@@ -305,6 +305,23 @@ class TestSkinAppliesOutsideTheCLI:
         assert get_active_skin().name == "ares"
         assert get_active_skin_name() == "ares"
 
+    def test_name_accessor_resolves_on_its_own(self, monkeypatch, tmp_path):
+        """get_active_skin_name() alone: the answer must not depend on get_active_skin() running first."""
+        from hermes_cli.skin_engine import get_active_skin_name
+
+        self._home_with_skin(monkeypatch, tmp_path, "ares")
+
+        assert get_active_skin_name() == "ares"
+
+    def test_unloadable_skin_keeps_its_configured_name(self, monkeypatch, tmp_path):
+        """The pair an initialized CLI reports: the default skin, under the name the user set."""
+        from hermes_cli.skin_engine import get_active_skin, get_active_skin_name
+
+        self._home_with_skin(monkeypatch, tmp_path, "lunaobt")
+
+        assert get_active_skin_name() == "lunaobt"
+        assert get_active_skin().name == "default"
+
     def test_user_yaml_skin_applies_without_any_cli_init(self, monkeypatch, tmp_path):
         """The reported symptom: a user skin file, not a built-in, ignored in a cold process."""
         import yaml

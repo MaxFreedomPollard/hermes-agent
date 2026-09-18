@@ -429,6 +429,22 @@ def load_skin(name: str) -> SkinConfig:
     return _build_skin_config(data or _BUILTIN_SKINS.get(name) or _BUILTIN_SKINS["default"])
 
 
+def _resolve_launch_skin() -> None:
+    """Fill the unrouted slot from ``display.skin`` in a process that never ran the CLI init."""
+    if _active_skin is None:
+        # Cold unrouted process: nobody ran init_skin_from_config() (gateway, cron, any entry
+        # point that is not the CLI), so ``display.skin`` was never honoured. Resolve it here,
+        # the same way the routed branch of get_active_skin() does. An explicit
+        # set_active_skin() has already filled this slot, so it still wins; an unreadable
+        # config leaves the default in place.
+        # Guarded where the routed branch is not: that one runs only for a live routed
+        # profile, while this runs on every render path in any process, and a display helper
+        # must not raise. _profile_config() already returns {} for a config it cannot read, so
+        # the guard is a backstop rather than a fix for an observed failure.
+        with suppress(Exception):
+            init_skin_from_config(_profile_config())
+
+
 def get_active_skin() -> SkinConfig:
     """Currently active skin config (cached)."""
     global _active_skin
@@ -440,17 +456,7 @@ def get_active_skin() -> SkinConfig:
             init_skin_from_config(_profile_config())
             entry = _active_skin_by_home[home_key]
         return entry[1]
-    if _active_skin is None:
-        # Cold unrouted process: nobody ran init_skin_from_config() (gateway, cron, any entry
-        # point that is not the CLI), so ``display.skin`` was never honoured. Resolve it here,
-        # the same way the routed branch above does. An explicit set_active_skin() has already
-        # filled this slot, so it still wins; an unreadable config leaves the default below.
-        # Guarded where the routed branch above is not: that one runs only for a live routed
-        # profile, while this runs on every render path in any process, and a display helper
-        # must not raise. _profile_config() already returns {} for a config it cannot read, so
-        # the guard is a backstop rather than a fix for an observed failure.
-        with suppress(Exception):
-            init_skin_from_config(_profile_config())
+    _resolve_launch_skin()
     if _active_skin is None:
         _active_skin = load_skin(_active_skin_name)
     return _active_skin
@@ -474,6 +480,8 @@ def get_active_skin_name() -> str:
     if home_key is not None:
         entry = _active_skin_by_home.get(home_key)
         return entry[0] if entry else "default"
+    # Same resolve as get_active_skin(), so the name does not depend on which accessor ran first.
+    _resolve_launch_skin()
     return _active_skin_name
 
 
