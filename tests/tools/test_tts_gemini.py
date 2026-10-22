@@ -194,6 +194,31 @@ class TestGenerateGeminiTts:
         assert prompt_text == "Hi there."
         assert "audio tag rewrite failed" in caplog.text
 
+    @pytest.mark.parametrize("placeholder, transcript", [
+        # Escapes ``re`` rejects: the request died with "bad escape \U" before it was sent.
+        ("{transcript}", r"Saved to C:\Users\max\notes, matching \d+ and then \1."),
+        # Escapes ``re`` accepts: the text was rewritten silently (\f -> form feed, \\ -> \).
+        ("{{ transcript }}", r"LaTeX \frac{1}{2}; JSON escapes a newline as \\n."),
+    ])
+    def test_persona_placeholder_takes_the_transcript_verbatim(
+        self, tmp_path, monkeypatch, mock_gemini_response, placeholder, transcript
+    ):
+        """The persona file's ``{transcript}`` placeholder is replaced with the live TTS text as-is:
+        backslashes in it (Windows paths, regexes, LaTeX) are text to speak, not template escapes."""
+        from tools.tts_tool import _generate_gemini_tts
+
+        persona = tmp_path / "persona.md"
+        persona.write_text(
+            f"# AUDIO PROFILE\nA calm narrator.\n\n## TRANSCRIPT\n{placeholder}\n", encoding="utf-8")
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        config = {"gemini": {"persona_prompt_file": str(persona)}}
+
+        with patch("requests.post", return_value=mock_gemini_response) as mock_post:
+            _generate_gemini_tts(transcript, str(tmp_path / "test.wav"), config)
+
+        prompt_text = mock_post.call_args[1]["json"]["contents"][0]["parts"][0]["text"]
+        assert prompt_text.endswith(f"## TRANSCRIPT\n{transcript}")
+
 
 class TestGeminiInCheckRequirements:
     def test_gemini_api_key_satisfies_requirements(self, monkeypatch):

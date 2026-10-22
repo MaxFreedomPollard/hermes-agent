@@ -542,7 +542,9 @@ def _compose_gemini_tts_prompt(text: str, gemini_config: dict[str, Any], persona
     for pattern in (r"\{\{\s*transcript\s*\}\}", r"\{\s*transcript\s*\}"):
         compiled = re.compile(pattern, flags=re.IGNORECASE)
         if compiled.search(persona_prompt):
-            return f"{preamble}\n\n{compiled.sub(transcript, persona_prompt)}".strip()
+            # A function replacement inserts the transcript verbatim; as a template string ``re`` would
+            # parse its backslashes (``C:\Users`` -> "bad escape \U", ``\frac`` -> form feed + "rac").
+            return f"{preamble}\n\n{compiled.sub(lambda _m: transcript, persona_prompt)}".strip()
     return f"{preamble}\n\n{persona_prompt}\n\n#### TRANSCRIPT\n{transcript}".strip()
 
 
