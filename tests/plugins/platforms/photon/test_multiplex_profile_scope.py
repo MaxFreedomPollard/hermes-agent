@@ -20,15 +20,23 @@ ordering let a raw env read override even an explicitly configured
 config.yaml extra.
 
 Mirrors the LINE/DingTalk/IRC/Mattermost fix for #98738.
+
+The sidecar child env had the same leak (a residual site listed in #111617):
+_start_sidecar copied os.environ, so the settings sidecar/index.mjs reads
+(PHOTON_READ_RECEIPTS, PHOTON_TELEMETRY, PHOTON_STREAM_* ...) came from the
+default profile.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from gateway.config import PlatformConfig
+from plugins.platforms.photon import adapter as photon_adapter
 from plugins.platforms.photon import auth as photon_auth
 from plugins.platforms.photon.adapter import PhotonAdapter
 
@@ -120,3 +128,73 @@ class TestAdapterMultiplexProfileScope:
         adapter = PhotonAdapter(cfg)
         assert adapter._project_id == "profile-project-id"
 
+
+async def _sidecar_spawn_env(monkeypatch: pytest.MonkeyPatch, adapter: PhotonAdapter) -> dict:
+    """Run _start_sidecar with Node, npm and the HTTP probe faked; return the env it spawned with."""
+    spawned: dict = {}
+
+    async def _noop(*_args, **_kwargs) -> None:
+        return None
+
+    for step in ("_ensure_sidecar_deps", "_reap_stale_sidecar", "_apply_spectrum_patch"):
+        monkeypatch.setattr(adapter, step, _noop)
+
+    def _fake_popen(cmd, **kwargs):
+        spawned.update(kwargs["env"])
+        return SimpleNamespace(pid=4242, stdout=None, stdin=None, poll=lambda: None)
+
+    class _HealthyClient:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc) -> bool:
+            return False
+
+        async def post(self, *_args, **_kwargs):
+            return SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr(photon_adapter.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(photon_adapter.httpx, "AsyncClient", _HealthyClient)
+    await adapter._start_sidecar()
+    return spawned
+
+
+class TestSidecarEnvMultiplexProfileScope:
+    """_start_sidecar: the settings sidecar/index.mjs reads come from the profile that owns the adapter."""
+
+    @pytest.fixture(autouse=True)
+    def _pm_node(self, monkeypatch):
+        monkeypatch.setattr(photon_adapter, "find_node_executable", lambda _name: "/pm/node")
+
+    @pytest.fixture
+    def launch_sidecar_settings(self, monkeypatch):
+        """The default (launch) profile's sidecar settings in os.environ."""
+        monkeypatch.setenv("PHOTON_TELEMETRY", "on")
+        monkeypatch.setenv("PHOTON_READ_RECEIPTS", "true")
+        monkeypatch.setenv("PHOTON_STREAM_SILENCE_PROBE_MS", "0")
+
+    def test_secondary_sidecar_gets_its_own_settings_not_the_launch_profiles(
+        self, monkeypatch, tmp_hermes_home, multiplex_scope, default_profile_env, launch_sidecar_settings
+    ):
+        multiplex_scope({"PHOTON_PROJECT_ID": "profile-project-id", "PHOTON_PROJECT_SECRET": "profile-secret",
+                         "PHOTON_READ_RECEIPTS": "false"})
+        # asyncio.run copies this context, so the sidecar spawns under the secondary profile's scope.
+        env = asyncio.run(_sidecar_spawn_env(monkeypatch, PhotonAdapter(PlatformConfig(enabled=True, extra={}))))
+        assert env["PHOTON_READ_RECEIPTS"] == "false"
+        # Telemetry is opt-in per profile: the default profile's opt-in must not switch it on here.
+        assert "PHOTON_TELEMETRY" not in env
+        assert "PHOTON_STREAM_SILENCE_PROBE_MS" not in env
+        assert env["PHOTON_PROJECT_ID"] == "profile-project-id"
+        assert env["PHOTON_PROJECT_SECRET"] == "profile-secret"
+
+    def test_unscoped_default_profile_sidecar_keeps_its_env_settings(
+        self, monkeypatch, tmp_hermes_home, default_profile_env, launch_sidecar_settings
+    ):
+        env = asyncio.run(_sidecar_spawn_env(monkeypatch, PhotonAdapter(PlatformConfig(enabled=True, extra={}))))
+        assert env["PHOTON_TELEMETRY"] == "on"
+        assert env["PHOTON_READ_RECEIPTS"] == "true"
+        assert env["PHOTON_STREAM_SILENCE_PROBE_MS"] == "0"
+        assert env["PHOTON_PROJECT_ID"] == "default-project-id"

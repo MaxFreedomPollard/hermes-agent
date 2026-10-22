@@ -59,6 +59,13 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_SIDECAR_PORT = 8789
 _DEFAULT_SIDECAR_BIND = "127.0.0.1"
+# Settings sidecar/index.mjs reads from its own environment (credentials and listener values are
+# passed explicitly by _start_sidecar).
+_SIDECAR_SETTING_ENV = (
+    "PHOTON_READ_RECEIPTS", "PHOTON_TELEMETRY", "PHOTON_PROBE_SPACE_ID", "PHOTON_MAX_INLINE_ATTACHMENT_BYTES",
+    "PHOTON_STREAM_DEGRADED_RESTART_MS", "PHOTON_STREAM_INTERRUPTED_DEGRADE_COUNT",
+    "PHOTON_STREAM_SILENCE_PROBE_MS", "PHOTON_STREAM_PROBE_COOLDOWN_MS", "PHOTON_STREAM_PROBE_TIMEOUT_MS",
+)
 _MAX_MESSAGE_LENGTH = 8000  # iMessage caps practical size at ~16 KB; conservative, matches BlueBubbles
 # Out-of-process senders (cron, `hermes send`) need the live sidecar's port + spawn-time
 # token; persisted once /healthz passes, removed on every stop / failed-start path.
@@ -1027,6 +1034,27 @@ class PhotonAdapter(BasePlatformAdapter):
         except Exception as exc:
             logger.warning("[photon] failed to apply Spectrum mixed attachment patch: %s", exc)
 
+    def _sidecar_env(self) -> dict[str, str]:
+        """Sidecar process env: this profile's sidecar settings, credentials and listener values.
+
+        with_hermes_node_path() copies os.environ, which under a multiplexed secondary profile holds
+        the DEFAULT profile's .env, so every setting the sidecar reads is re-resolved from this
+        profile (dropped on a scoped miss), never inherited from the launch env."""
+        env = with_hermes_node_path()
+        for key in _SIDECAR_SETTING_ENV:
+            value = _get_scoped_secret(key)
+            if value is not None and str(value).strip():
+                env[key] = str(value)
+            else:
+                env.pop(key, None)
+        env.update({
+            "PHOTON_PROJECT_ID": self._project_id, "PHOTON_PROJECT_SECRET": self._project_secret,
+            "PHOTON_SIDECAR_PORT": str(self._sidecar_port), "PHOTON_SIDECAR_BIND": self._sidecar_bind,
+            "PHOTON_SIDECAR_TOKEN": self._sidecar_token,
+            # Exit on stdin EOF so ANY gateway death (incl. SIGKILL) can't orphan it on the port.
+            "PHOTON_SIDECAR_WATCH_STDIN": "1"})
+        return env
+
     async def _start_sidecar(self) -> None:
         if self._node_bin is None:
             import pm
@@ -1041,13 +1069,7 @@ class PhotonAdapter(BasePlatformAdapter):
                 raise PhotonSidecarStartupError(str(exc), code="SIDECAR_NODE_MISSING", retryable=False) from exc
         await self._ensure_sidecar_deps()
         await self._reap_stale_sidecar()
-        env = with_hermes_node_path()
-        env.update({
-            "PHOTON_PROJECT_ID": self._project_id, "PHOTON_PROJECT_SECRET": self._project_secret,
-            "PHOTON_SIDECAR_PORT": str(self._sidecar_port), "PHOTON_SIDECAR_BIND": self._sidecar_bind,
-            "PHOTON_SIDECAR_TOKEN": self._sidecar_token,
-            # Exit on stdin EOF so ANY gateway death (incl. SIGKILL) can't orphan it on the port.
-            "PHOTON_SIDECAR_WATCH_STDIN": "1"})
+        env = self._sidecar_env()
         from hermes_cli._subprocess_compat import windows_hide_flags  # hide child console on Windows
         await self._apply_spectrum_patch(windows_hide_flags())
         try:
