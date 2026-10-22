@@ -8,9 +8,13 @@ global vs regional base-URL shapes, and the ADC→service-account fallback.
 
 from __future__ import annotations
 
+import contextlib
 import importlib
+import os
 import sys
+import time
 import types
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -271,3 +275,83 @@ def test_metadata_preserving_rotation_invalidates_creds_cache(vertex_adapter, mo
     (key2,) = vertex_adapter._creds_cache
     assert key2 != key1, "content change must produce a new cache key"
     assert vertex_adapter._creds_cache[key2][0] is not creds_obj_1
+
+
+# --- Token reuse does not depend on the host's timezone ---
+
+
+def _naive_utcnow() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+class _ExpiringCreds:
+    """google-auth's contract: ``expiry`` is a NAIVE UTC datetime (``_helpers.utcnow()`` plus
+    ``expires_in``) and ``expired`` compares it with naive UTC minus a 3m45s skew."""
+
+    project_id = "sa-project"
+
+    def __init__(self):
+        self.token, self.expiry, self.refreshes = None, None, 0
+
+    @property
+    def expired(self):
+        return self.expiry is not None and _naive_utcnow() >= self.expiry - timedelta(minutes=3, seconds=45)
+
+    def refresh(self, request):
+        self.refreshes += 1
+        self.token = f"ya29.mint{self.refreshes}"
+        self.expiry = _naive_utcnow() + timedelta(seconds=3599)
+
+
+@contextlib.contextmanager
+def _process_timezone(tz: str):
+    """Switch the process-local timezone (POSIX ``TZ`` string) for the block."""
+    original = os.environ.get("TZ")
+    os.environ["TZ"] = tz
+    time.tzset()
+    try:
+        yield
+    finally:
+        if original is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = original
+        time.tzset()
+
+
+@pytest.fixture
+def expiring_creds(vertex_adapter, monkeypatch, tmp_path):
+    creds = _ExpiringCreds()
+    sa_file = tmp_path / "sa.json"
+    sa_file.write_text('{"project_id": "sa-project"}')
+    monkeypatch.setattr(vertex_adapter, "_resolve_credentials_path", lambda explicit=None: str(sa_file))
+    monkeypatch.setattr(vertex_adapter.service_account.Credentials, "from_service_account_info",
+                        staticmethod(lambda info, scopes=None: creds))
+    return creds
+
+
+@pytest.mark.platforms("posix")  # time.tzset() is how the test moves the host timezone
+@pytest.mark.parametrize("tz", ["UTC0", "CET-1", "JST-9"])  # UTC, UTC+1, UTC+9
+def test_fresh_token_is_reused_in_any_timezone(vertex_adapter, expiring_creds, tz):
+    """A minted token is reused until it nears expiry, wherever the host clock is set. Read
+    with ``.timestamp()``, the naive-UTC expiry was taken as local time, so east of UTC a
+    fresh one-hour token looked expired and every resolution ran a new OAuth exchange."""
+    with _process_timezone(tz):
+        first, _ = vertex_adapter.get_vertex_credentials()
+        second, _ = vertex_adapter.get_vertex_credentials()
+    assert expiring_creds.refreshes == 1
+    assert second == first
+
+
+@pytest.mark.platforms("posix")  # time.tzset() is how the test moves the host timezone
+@pytest.mark.parametrize("tz", ["UTC0", "EST5", "PST8"])  # UTC, UTC-5, UTC-8
+def test_token_inside_the_refresh_window_is_reminted_in_any_timezone(vertex_adapter, expiring_creds, tz):
+    """Four minutes left is inside the five-minute refresh window (google-auth's own
+    ``expired`` only trips at 3m45s). West of UTC the local-time reading pushed the expiry
+    hours out, so the early refresh never fired."""
+    with _process_timezone(tz):
+        vertex_adapter.get_vertex_credentials()
+        expiring_creds.expiry = _naive_utcnow() + timedelta(minutes=4)
+        token, _ = vertex_adapter.get_vertex_credentials()
+    assert expiring_creds.refreshes == 2
+    assert token == "ya29.mint2"
