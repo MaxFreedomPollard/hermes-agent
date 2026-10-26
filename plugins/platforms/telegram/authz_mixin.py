@@ -21,10 +21,10 @@ resolution order is what it was when these methods sat on the class.
 
 Two details keep the lift observationally identical:
 
-* ``logger`` is bound by explicit name rather than ``__name__``, so records
-  emitted from these methods keep the logger name
-  ``"plugins.platforms.telegram.adapter"``. ``getLogger`` returns the same
-  singleton object the adapter module holds.
+* ``logger`` is bound to ``f"{__package__}.adapter"`` rather than
+  ``__name__``, so records emitted from these methods keep the adapter's
+  logger name under whichever package the adapter was imported as.
+  ``getLogger`` returns the same singleton object the adapter module holds.
 * ``Message`` is imported under the same ``ImportError`` guard the adapter
   uses, falling back to ``Any``. This module deliberately does not enable
   postponed annotation evaluation, matching the adapter, so the annotations on
@@ -37,6 +37,7 @@ from typing import Any, Optional
 
 from gateway.authz_mixin import _coerce_allow_set
 from gateway.config import Platform
+from gateway.platforms._shared import platform_gate_env as _scoped_gate_env
 
 try:
     from telegram import Message
@@ -50,20 +51,6 @@ except ImportError:  # pragma: no cover - mirrors the adapter's import guard
 # adapter's own ``getLogger(__name__)`` is ``hermes_plugins.<slug>.adapter``
 # there and ``plugins.platforms.telegram.adapter`` under the canonical path.
 logger = logging.getLogger(f"{__package__}.adapter")
-
-
-def _scoped_gate_env(name: str, default: str = "") -> str:
-    """Read a TELEGRAM_*/GATEWAY_* authorization gate env var per-profile.
-
-    The reader itself stays in the adapter, which owns the rest of the
-    profile-scoping helpers; delegating rather than copying keeps the two from
-    drifting apart, which matters because these gates decide who may talk to
-    the agent (issue #72348). The import is deferred to call time because the
-    adapter imports this module while it is still executing.
-    """
-    from .adapter import _scoped_gate_env as _adapter_scoped_gate_env
-
-    return _adapter_scoped_gate_env(name, default)
 
 
 class TelegramAuthorizationMixin:
