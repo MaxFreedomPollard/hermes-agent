@@ -700,7 +700,7 @@ def _converse_image_block(media_type, data: str) -> dict:
     try:
         # Ref: #33317.
         raw_bytes = base64.b64decode(data)
-    except Exception:
+    except ValueError:  # binascii.Error (bad padding/alphabet) or a non-ASCII str
         raw_bytes = data.encode("utf-8")
     return {"image": {"format": media_type.split("/")[-1] if "/" in media_type else "jpeg", "source": {"bytes": raw_bytes}}}
 

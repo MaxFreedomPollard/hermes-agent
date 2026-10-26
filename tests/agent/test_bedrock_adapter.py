@@ -343,7 +343,7 @@ class TestConvertMessagesToConverse:
         from agent.bedrock_adapter import _convert_content_to_converse
         blocks = _convert_content_to_converse([{
             "type": "image", "source": {"type": "base64", "data": "iVBORw0KGgo="}}])
-        assert [b for b in blocks if "image" in b][0]["image"]["format"] == "jpeg"
+        assert next(b for b in blocks if "image" in b)["image"]["format"] == "jpeg"
 
     def test_anthropic_image_url_source_becomes_text_reference(self):
         from agent.bedrock_adapter import _convert_content_to_converse
