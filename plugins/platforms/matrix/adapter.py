@@ -77,10 +77,10 @@ from gateway.platforms.base import (
     SendResult, resolve_proxy_url, proxy_kwargs_for_aiohttp, ssrf_redirect_guard,
 )
 from gateway.platforms.base import transcode_to_ogg_opus
-from gateway.platforms.event import MessageEvent, MessageType, ProcessingOutcome
+from gateway.platforms.event import MessageEvent, MessageType
 from gateway.platforms.helpers import ThreadParticipationTracker
 from plugins.platforms.matrix.voice_mention import ParkedVoices, VoiceGate, has_voice_marker, is_voice_event
-from plugins.platforms.matrix.reactions_mixin import MatrixReactionsMixin
+from .reactions_mixin import MatrixReactionsMixin
 
 logger = logging.getLogger(__name__)
 

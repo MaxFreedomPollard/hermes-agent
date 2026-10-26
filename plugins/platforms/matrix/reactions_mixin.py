@@ -21,9 +21,10 @@ base-class methods, and the mixin must win exactly as the adapter's own
 definitions did. It never imports the adapter module, so there is no cycle.
 
 Behavior-neutral: every method is lifted verbatim from ``MatrixAdapter``.
-``logger`` is bound by explicit name rather than ``__name__``, so records keep
-the name ``"plugins.platforms.matrix.adapter"``; ``getLogger`` returns the
-same singleton object the adapter module holds. ``EventType`` and ``RoomID``
+``logger`` is bound to ``f"{__package__}.adapter"`` rather than ``__name__``,
+so records keep the adapter's logger name under whichever package the adapter
+was imported as; ``getLogger`` returns the same singleton object the adapter
+module holds. ``EventType`` and ``RoomID``
 are imported under the adapter's own ``ImportError`` guard; the moved code
 uses only ``RoomID`` as a cast and ``EventType.REACTION`` as a string
 constant, so the real mautrix types and the fallback stubs behave alike.
@@ -49,9 +50,13 @@ except ImportError:
         "ROOM_MESSAGE": "m.room.message", "REACTION": "m.reaction",
         "ROOM_ENCRYPTED": "m.room.encrypted", "ROOM_NAME": "m.room.name"})
 
-# Bind the adapter's logger by name so records lifted with these methods are
-# emitted under exactly the name they were before.
-logger = logging.getLogger("plugins.platforms.matrix.adapter")
+# Bind the adapter's logger relative to whichever package this module was
+# imported under, so log records lifted with these methods are emitted under
+# exactly the name they were before. The name cannot be hard-coded: the plugin
+# manager loads directory plugins as ``hermes_plugins.<slug>``, so the
+# adapter's own ``getLogger(__name__)`` is ``hermes_plugins.<slug>.adapter``
+# there and ``plugins.platforms.matrix.adapter`` under the canonical path.
+logger = logging.getLogger(f"{__package__}.adapter")
 
 
 class MatrixReactionsMixin:
