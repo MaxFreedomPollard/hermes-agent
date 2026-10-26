@@ -41,14 +41,13 @@ transport:
 # Dashboard button, and the server runs under mcp 1.x and 2.x from one
 # wheel (mcp 2.0 removed mcp.server.fastmcp; the import follows whichever
 # module the installed SDK has). This bootstrap's `pip install .` at this
-# SHA resolved mcp 2.2.0 and the probe below ran on it. The current release
-# is v4.10.0 (2026-09-16), pin-eligible 2026-09-30. Bumping the pin is a PR
-# to this manifest.
+# SHA resolved mcp 2.2.0 and the probe above ran on it. Bumping the pin is
+# a PR to this manifest.
 #
-# The bootstrap is POSIX-shaped (same as the n8n entry): macOS and Linux
-# install through it as-is. Windows has no `python3`/`.venv/bin`, so
-# post_install documents the direct path there (pip install + `hermes
-# mcp add`); the engine's dependencies are wheels-only on all three OSes.
+# The bootstrap is POSIX-shaped: macOS and Linux install through it as-is.
+# Windows has no `python3`/`.venv/bin`, so post_install documents the
+# direct path there (pip install + `hermes mcp add`); the engine's
+# dependencies are wheels-only on all three OSes.
 install:
   type: git
   url: https://github.com/MaxFreedomPollard/Compartment.git
