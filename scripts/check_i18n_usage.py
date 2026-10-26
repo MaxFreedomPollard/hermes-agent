@@ -38,20 +38,20 @@ Exit 1 with a file:line list on any hit. Run: python scripts/check_i18n_usage.py
 from __future__ import annotations
 
 import ast
+import os
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
-
 ROOT = Path(__file__).resolve().parent.parent
 LOCALES_DIR = ROOT / "locales"
 
 # Directories whose ``t()`` calls are not first-party production strings: test
-# fixtures invent keys on purpose, and the JS/docs trees have no Python callers.
+# fixtures invent keys on purpose, the JS/docs trees have no Python callers, and
+# a checkout's virtualenv holds third-party code.
 SKIP_DIRS = {
-    ".git", "__pycache__", ".worktrees", "node_modules", "build",
+    ".git", "__pycache__", ".worktrees", ".venv", "venv", "node_modules", "build",
     "tests", "web", "website", "apps", "ui-tui", "docs", "assets",
 }
 
@@ -314,8 +314,14 @@ def flatten(catalog: dict | None, prefix: str = "") -> dict[str, object]:
 
 
 def load_english_catalog() -> dict[str, object]:
-    with (LOCALES_DIR / "en.yaml").open("r", encoding="utf-8") as handle:
-        return flatten(yaml.safe_load(handle))
+    # Parsed the way agent.i18n parses it: hermes_yaml (the repo's one YAML policy), BOM tolerated.
+    # hermes_yaml sits at the repository root, which is not on sys.path when this runs as a script.
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    import hermes_yaml
+
+    with (LOCALES_DIR / "en.yaml").open("r", encoding="utf-8-sig") as handle:
+        return flatten(hermes_yaml.safe_load(handle))
 
 
 def missing_keys(calls: list[TCall], english: dict[str, object]) -> list[str]:
@@ -345,18 +351,20 @@ def missing_placeholders(calls: list[TCall], english: dict[str, object]) -> list
 
 
 def iter_python_files():
-    for path in sorted(ROOT.rglob("*.py")):
-        rel = path.relative_to(ROOT)
-        if any(part in SKIP_DIRS for part in rel.parts):
-            continue
-        yield path, rel
+    # Pruned walk: a skipped directory (a virtualenv, node_modules) is never descended into.
+    for dirpath, dirnames, filenames in os.walk(ROOT):
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+        for name in sorted(filenames):
+            if name.endswith(".py"):
+                path = Path(dirpath) / name
+                yield path, path.relative_to(ROOT)
 
 
 def collect_calls() -> list[TCall]:
     calls: list[TCall] = []
     for path, rel in iter_python_files():
         try:
-            src = path.read_text(encoding="utf-8")
+            src = path.read_text(encoding="utf-8-sig")
         except (OSError, UnicodeDecodeError):
             continue
         if "i18n" not in src:
@@ -366,8 +374,12 @@ def collect_calls() -> list[TCall]:
 
 
 def main() -> int:
-    english = load_english_catalog()
     calls = collect_calls()
+    if not calls:
+        # Nothing calls t(), so there is nothing to hold against a catalog (a tree may have none).
+        print("✅ no static t() calls to check")
+        return 0
+    english = load_english_catalog()
     missing = missing_keys(calls, english)
     gaps = missing_placeholders(calls, english)
     if missing:

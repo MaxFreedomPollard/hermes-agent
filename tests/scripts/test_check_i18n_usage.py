@@ -293,3 +293,33 @@ def test_non_string_catalog_values_are_not_scanned_for_placeholders(checker):
 def test_flatten_builds_dotted_keys(checker):
     flat = checker.flatten({"gateway": {"draining": "{count} left"}, "top": "x"})
     assert flat == {"gateway.draining": "{count} left", "top": "x"}
+
+
+# ---------------------------------------------------------------------------
+# The tree sweep and the catalog read.
+# ---------------------------------------------------------------------------
+
+
+def test_english_catalog_is_read_the_way_the_runtime_reads_it(checker, tmp_path, monkeypatch):
+    """Nested sections flatten to dotted keys, and a BOM-prefixed catalog still loads."""
+    (tmp_path / "en.yaml").write_text(
+        '\ufeffgateway:\n  draining: "{count} left"\ntop: "x"\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(checker, "LOCALES_DIR", tmp_path)
+    assert checker.load_english_catalog() == {"gateway.draining": "{count} left", "top": "x"}
+
+
+def test_sweep_skips_virtualenvs_and_test_trees(checker, tmp_path, monkeypatch):
+    call = "from agent.i18n import t\nt('{}')\n"
+    for rel, key in [("pkg/real.py", "first.party"), (".venv/lib/dep.py", "third.party"),
+                     ("tests/test_x.py", "invented.by.a.test")]:
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(call.format(key), encoding="utf-8")
+    monkeypatch.setattr(checker, "ROOT", tmp_path)
+    assert [c.key for c in checker.collect_calls()] == ["first.party"]
+
+
+def test_a_tree_without_t_calls_needs_no_catalog(checker, tmp_path, monkeypatch):
+    monkeypatch.setattr(checker, "collect_calls", list)
+    monkeypatch.setattr(checker, "LOCALES_DIR", tmp_path / "no-locales-here")
+    assert checker.main() == 0
