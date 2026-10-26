@@ -32,6 +32,7 @@ from hermes_constants import get_hermes_home
 from cron.constants import CLAIM_TTL_INACTIVITY_HEADROOM, FIRE_CLAIM_SKEW_SECONDS, FIRE_CLAIM_TTL_SECONDS
 from cron.env_settings import cron_env_setting
 from cron.jobs_invariants import _validate_job_mode_invariants
+from cron.jobs_interval import _interval_schedule
 from cron.scheduler_ownership import _claim_owner_is_dead
 from cron import store_health
 from typing import Optional, Dict, List, Any, Callable, Set, Tuple, Union, Collection
@@ -776,22 +777,6 @@ def _cron_schedule(
     return {"kind": "cron", "expr": expr, "display": display}
 
 
-def _interval_schedule(minutes: int, original: Optional[str] = None) -> dict[str, Any]:
-    """Build a recurring interval schedule, rejecting a sub-minute one.
-
-    A zero (or sub-minute) interval is not a recurrence: the next run computes to
-    ``last_run + 0 == last_run``, which is always in the past, so the job is perpetually
-    due and re-fires on every scheduler tick. Both interval forms ("every 0m" and a bare
-    "0m") land here, so the guard covers each of them.
-    """
-    if minutes < 1:
-        raise ValueError(
-            f"Invalid interval '{original if original is not None else f'{minutes}m'}': "
-            f"recurring interval must be at least 1 minute. "
-            f"Use e.g. 'every 1m', 'every 30m', or 'every 2h'.")
-    return {"kind": "interval", "minutes": minutes, "display": f"every {minutes}m"}
-
-
 def parse_schedule(schedule: str) -> dict[str, Any]:
     """Parse a schedule string into ``{"kind": "once"|"interval"|"cron", ...}`` with ``run_at`` /
     ``minutes`` / ``expr``. "30m" and "every 30m" are recurring intervals; "every monday 9am" and
@@ -855,12 +840,8 @@ def parse_schedule(schedule: str) -> dict[str, Any]:
         # Durations measure elapsed time, not wall-clock hours across a DST transition.
         run_at = (now.astimezone(UTC) + timedelta(minutes=minutes)).astimezone(now.tzinfo)
         return {"kind": "once", "run_at": run_at.isoformat(), "display": f"once in {duration_str}"}
-    # Suppress only the "this is not a duration" failure, so a non-duration string still
-    # falls through to the generic help text below. A string that IS a duration but names an
-    # invalid interval ("0m") must surface _interval_schedule's specific message instead of
-    # being swallowed into that generic text.
     bare_minutes = None
-    with contextlib.suppress(ValueError):
+    with contextlib.suppress(ValueError):  # only "not a duration": a "0m" interval raises below
         bare_minutes = parse_duration(schedule)
     if bare_minutes is not None:
         return _interval_schedule(bare_minutes, original)
@@ -1204,12 +1185,8 @@ def compute_next_run(schedule: dict[str, Any], last_run_at: Optional[str] = None
         minutes = schedule.get("minutes")
         if minutes is None:
             return None
-        # Clamp to a 1-minute floor so a legacy/persisted job that somehow carries a zero
-        # (or negative) interval still advances instead of re-firing every tick. New jobs
-        # are rejected at parse time; this is the recovery path for rows already on disk.
-        minutes = max(1, minutes)
         # Add in UTC so an interval keeps its duration when the profile's UTC offset changes.
-        next_run = base_time.astimezone(UTC) + timedelta(minutes=minutes)
+        next_run = base_time.astimezone(UTC) + timedelta(minutes=max(1, minutes))  # a stored 0m row looped
         return next_run.astimezone(base_time.tzinfo).isoformat()
     if kind == "cron":
         expr = schedule.get("expr")
