@@ -390,10 +390,21 @@ class TestContentDivergenceGuard:
         assert new == content
         assert "audit_log(request.user_id)" in new
 
+    def test_context_aware_short_line_drift_does_not_overwrite(self):
+        # context_aware accepts a line once it is 0.80 similar, so a one-line
+        # old_string naming a different argument landed on the real call and
+        # rewrote it. The guard needs the region itself to match.
+        content = "def check(request):\n    validate(request.user)\n    return True\n"
+        new, count, strategy, _err = fuzzy_find_and_replace(
+            content, "validate(request.token)", "validate(request.session)")
+        assert count == 0, f"overwrote a different call via {strategy}"
+        assert new == content
+
     def test_context_aware_half_matching_block_does_not_overwrite(self):
         # Only the first and last of four lines match the file. The two middle
         # lines (the real balance check and ledger debit) never appear in
-        # old_string and must survive.
+        # old_string and must survive. (context_aware's all-lines rule from
+        # #76450 rejects this one on its own; kept as a control.)
         content = (
             "def transfer(amount, dst):\n"
             "    check_balance(amount)\n"

@@ -305,9 +305,10 @@ SIMILARITY_STRATEGIES = frozenset({"block_anchor", "context_aware"})
 # *content* differs from old_string by more than formatting. They are reached only after
 # every formatting-tolerant strategy has already failed, so when they fire, old_string is
 # not present except as an approximate shape. A match that is the same block with a line
-# or two drifted is a useful rescue; a match that merely shares its first/last line (or
-# half its lines) with an unrelated block means we would overwrite text the caller never
-# named. Require the matched region to be substantially the same text as old_string.
+# or two drifted is a useful rescue; a block that merely shares its first/last line with
+# old_string (block_anchor accepts a middle only 0.50 similar), or a short line that is
+# only 0.80 similar (context_aware's per-line floor), means we would overwrite text the
+# caller never named. Require the matched region to be substantially the same text.
 _FUZZY_CONTENT_FLOOR = 0.90
 
 
