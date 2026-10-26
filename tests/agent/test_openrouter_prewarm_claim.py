@@ -10,29 +10,77 @@ stubbed, so the claim is exercised on the production code path.
 """
 
 import threading
-import time
 from types import SimpleNamespace
 
-import agent.agent_init as agent_init
+from agent import agent_init
 import run_agent
 
 
 _WORKERS = 8
-_CLAIM_WINDOW = 0.1
 
 
-class _SlowClaimEvent(threading.Event):
-    """An Event whose ``set()`` takes ``_CLAIM_WINDOW`` seconds to land.
+class _ClaimGate:
+    """Holds the claimant's ``set()`` until every worker has reached the claim.
 
-    Every read stays truthful — ``is_set()`` is untouched — so this only widens the window
-    between "the claimant checked" and "the claim is visible", the gap the guard has to cover.
-    Widening it cannot *create* a race: with an atomic claim the delay is serialized behind the
-    lock and every later caller reads an Event that is already set.
+    A worker reaches it by reading the Event or by queueing on the claim lock. A non-atomic
+    check-then-set lets every worker read the Event clear before the first ``set()`` lands; an
+    atomic claim parks the others on the lock instead. Either way the gate opens on that
+    condition, not on the clock, so the race is forced rather than hoped for.
     """
 
+    def __init__(self, workers: int) -> None:
+        self._workers = workers
+        self._reached: set[int] = set()
+        self._cond = threading.Condition()
+        self.timed_out = False
+
+    def reach(self) -> None:
+        with self._cond:
+            self._reached.add(threading.get_ident())
+            self._cond.notify_all()
+
+    def hold(self) -> None:
+        with self._cond:
+            if not self._cond.wait_for(lambda: len(self._reached) >= self._workers, timeout=30):
+                self.timed_out = True
+
+
+class _GatedClaimEvent(threading.Event):
+    """An Event whose ``set()`` lands only once the gate opens.
+
+    Every read stays truthful, so this only widens the window between "the claimant checked"
+    and "the claim is visible", the gap the guard has to cover. Widening it cannot *create* a
+    race: with an atomic claim every later caller reads an Event that is already set.
+    """
+
+    def __init__(self, gate: _ClaimGate) -> None:
+        super().__init__()
+        self._gate = gate
+
+    def is_set(self) -> bool:
+        self._gate.reach()
+        return super().is_set()
+
     def set(self) -> None:
-        time.sleep(_CLAIM_WINDOW)
+        self._gate.hold()
         super().set()
+
+
+class _ArrivalLock:
+    """Stand-in for ``agent_init._OPENROUTER_PREWARM_LOCK`` that reports each caller before it queues."""
+
+    def __init__(self, gate: _ClaimGate) -> None:
+        self._gate = gate
+        self._lock = threading.Lock()
+
+    def __enter__(self):
+        self._gate.reach()
+        self._lock.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        self._lock.release()
+        return False
 
 
 def _openrouter_agent():
@@ -51,7 +99,7 @@ def _openrouter_agent():
     )
 
 
-def _race_finalize_routing(monkeypatch, event):
+def _race_finalize_routing(monkeypatch, event, gate):
     """Drive ``_WORKERS`` concurrent ``_finalize_routing`` calls; return (prewarm calls, errors)."""
     started, errors = [], []
     record_lock = threading.Lock()
@@ -62,12 +110,11 @@ def _race_finalize_routing(monkeypatch, event):
 
     monkeypatch.setattr(agent_init, "fetch_model_metadata", _record_prewarm)
     monkeypatch.setattr(run_agent, "_openrouter_prewarm_done", event)
-
-    barrier = threading.Barrier(_WORKERS)
+    # raising=False: a tree whose claim takes no lock leaves the stand-in unused, and the race shows.
+    monkeypatch.setattr(agent_init, "_OPENROUTER_PREWARM_LOCK", _ArrivalLock(gate), raising=False)
 
     def _init_one():
         try:
-            barrier.wait(timeout=30)
             agent_init._finalize_routing(_openrouter_agent(), "chat_completions", None)
         except Exception as exc:  # surfaced by the caller's assertion
             with record_lock:
@@ -86,21 +133,23 @@ def _race_finalize_routing(monkeypatch, event):
 
 def test_concurrent_init_starts_exactly_one_openrouter_prewarm(monkeypatch):
     """Racing inits claim the pre-warm once; the losers must not spawn their own thread."""
-    event = _SlowClaimEvent()
+    gate = _ClaimGate(_WORKERS)
+    event = _GatedClaimEvent(gate)
 
-    started, errors = _race_finalize_routing(monkeypatch, event)
+    started, errors = _race_finalize_routing(monkeypatch, event, gate)
 
     assert errors == []
+    assert not gate.timed_out, "workers neither read the Event nor queued on the claim lock"
     assert len(started) == 1, f"{len(started)} prewarm threads started, expected exactly 1"
     assert event.is_set() is True
 
 
 def test_prewarm_is_skipped_once_the_event_is_already_set(monkeypatch):
     """The Event stays the readable "already warmed" flag: a set Event means no spawn at all."""
-    event = _SlowClaimEvent()
+    event = threading.Event()
     event.set()
 
-    started, errors = _race_finalize_routing(monkeypatch, event)
+    started, errors = _race_finalize_routing(monkeypatch, event, _ClaimGate(_WORKERS))
 
     assert errors == []
     assert started == []
