@@ -349,8 +349,15 @@ def _split_draft(text: str) -> tuple[str, dict[int, str]]:
         for line in lines[header_idx + 1:]:
             m = _SOURCE_LINE_RE.match(line)
             if m:
+                token = m.group(2)
+                if token.startswith(("http://", "https://")):
+                    # ``render`` writes the URL as one bare token; take it
+                    # whole, since ")" and "'" (Wikipedia's
+                    # Mercury_(planet)) end _URL_IN_TEXT_RE matches early.
+                    listed[int(m.group(1))] = token
+                    continue
                 url_match = _URL_IN_TEXT_RE.search(line)
-                listed[int(m.group(1))] = url_match.group(0) if url_match else m.group(2)
+                listed[int(m.group(1))] = url_match.group(0) if url_match else token
         body_lines = lines[:header_idx]
     else:
         body_lines = lines

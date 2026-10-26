@@ -165,6 +165,33 @@ def test_sources_block_url_must_match_ledger(sources_mod, ledger: Path, tmp_path
     assert any("does not match the ledger" in e for e in errors)
 
 
+def test_rendered_urls_with_parentheses_and_apostrophes_verify(
+    sources_mod, ledger: Path, tmp_path: Path
+) -> None:
+    # ")" and "'" are legal URL characters (Wikipedia disambiguation and
+    # possessive titles); verify must accept the block render wrote for them.
+    sources_mod.add_sources(ledger, ["https://en.wikipedia.org/wiki/Mercury_(planet)"], title="Mercury")
+    sources_mod.add_sources(ledger, ["https://en.wikipedia.org/wiki/Ender's_Game"])
+    sources = json.loads(ledger.read_text(encoding="utf-8"))["sources"]
+    prose = (
+        "Mercury is the smallest planet in the Solar System.[1]\n"
+        "Ender's Game is a 1985 novel by Orson Scott Card.[2]\n\n"
+    )
+    for style in ("markdown", "plain", "evidence"):
+        text = prose + sources_mod.render_sources(sources, style=style) + "\n"
+        code, errors, _ = _verify(sources_mod, ledger, tmp_path, text)
+        assert (code, errors) == (0, []), style
+
+
+def test_sources_block_markdown_link_line_resolves_to_its_url(
+    sources_mod, ledger: Path, tmp_path: Path
+) -> None:
+    _seed(sources_mod, ledger)
+    text = "A real claim carrying a real id.[1]\n\nSources:\n[1] [Alpha](https://a.example)\n"
+    code, errors, _ = _verify(sources_mod, ledger, tmp_path, text)
+    assert (code, errors) == (0, [])
+
+
 def test_missing_sources_block_fails(sources_mod, ledger: Path, tmp_path: Path) -> None:
     _seed(sources_mod, ledger)
     code, errors, _ = _verify(sources_mod, ledger, tmp_path, "A real claim carrying an id.[1]\n")
