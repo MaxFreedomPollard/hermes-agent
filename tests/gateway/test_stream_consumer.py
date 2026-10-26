@@ -8,6 +8,7 @@ import pytest
 
 from agent.think_scrubber import THINK_TAG_NAMES
 from gateway.stream_consumer import GatewayStreamConsumer, StreamConsumerConfig
+from tests.waiting import async_wait_until
 
 
 
@@ -1298,10 +1299,8 @@ class TestUtf16SealOverflowHeads:
         # _first_send_overflows() is then False and the loop takes the seal path.
         consumer.on_delta("Launch report: ")
         task = asyncio.create_task(consumer.run())
-        await asyncio.sleep(0.08)
-        assert consumer._message_id is not None, (
-            "test setup invariant: the opening delta must create a message"
-        )
+        await async_wait_until(lambda: consumer._message_id is not None,
+                               what="the opening delta to create a message")
         assert consumer._edit_supported, "test setup invariant: edits must be supported"
 
         # 2500 rockets = 2500 codepoints (under the limit by len()) but 5000
@@ -1310,7 +1309,8 @@ class TestUtf16SealOverflowHeads:
         assert len(emoji_text) < safe_limit
         assert utf16_len(emoji_text) > safe_limit
         consumer.on_delta(emoji_text)
-        await asyncio.sleep(0.2)
+        await async_wait_until(lambda: adapter.send.call_count >= 2,
+                               what="a continuation message after the sealed head")
         consumer.finish()
         await task
 
@@ -1331,6 +1331,46 @@ class TestUtf16SealOverflowHeads:
         # split at safe_limit would have emitted an astral payload roughly twice
         # the budget, which the assertion above catches.
         assert max(utf16_len(t) for t in sent_texts + edited_texts) > safe_limit // 2
+
+
+class TestSplitTextChunksUtf16:
+    """Fallback chunking must respect the platform's length unit.
+
+    Regression: with a custom ``len_fn`` (Telegram's UTF-16 code units) the
+    no-newline fallback used ``split_at = limit`` - treating the UTF-16-unit
+    limit as a codepoint index. For astral text (emoji = 2 UTF-16 units/char)
+    this emitted chunks up to ~2x the limit, which the platform rejected as
+    "message is too long", so the fallback final message failed to send.
+    """
+
+    @staticmethod
+    def _u16(s: str) -> int:
+        return len(s.encode("utf-16-le")) // 2
+
+    def test_emoji_chunks_fit_utf16_limit_no_newline(self):
+        limit = 3996  # Telegram safe_limit (4096 - 100)
+        text = "😀" * 5000  # 10000 UTF-16 units, no newline
+        chunks = GatewayStreamConsumer._split_text_chunks(text, limit, len_fn=self._u16)
+        assert chunks
+        for c in chunks:
+            assert self._u16(c) <= limit, self._u16(c)
+        # Round-trips without loss.
+        assert "".join(chunks) == text
+
+    def test_emoji_chunks_fit_when_newline_in_first_half(self):
+        limit = 3996
+        text = "😀" * 100 + "\n" + "😀" * 5000
+        chunks = GatewayStreamConsumer._split_text_chunks(text, limit, len_fn=self._u16)
+        for c in chunks:
+            assert self._u16(c) <= limit, self._u16(c)
+
+    def test_plain_len_behaviour_unchanged(self):
+        # With the default len_fn, behaviour matches the original (limit == budget).
+        text = "a" * 9000
+        chunks = GatewayStreamConsumer._split_text_chunks(text, 4000, len_fn=len)
+        for c in chunks:
+            assert len(c) <= 4000
+        assert "".join(chunks) == text
 
 
 class TestFreshFinalRespectsAdapterDecline:
@@ -1663,45 +1703,3 @@ class TestFlushPendingSync:
         consumer.finish()
         await task
 
-
-
-
-
-class TestSplitTextChunksUtf16:
-    """Fallback chunking must respect the platform's length unit.
-
-    Regression: with a custom ``len_fn`` (Telegram's UTF-16 code units) the
-    no-newline fallback used ``split_at = limit`` - treating the UTF-16-unit
-    limit as a codepoint index. For astral text (emoji = 2 UTF-16 units/char)
-    this emitted chunks up to ~2x the limit, which the platform rejected as
-    "message is too long", so the fallback final message failed to send.
-    """
-
-    @staticmethod
-    def _u16(s: str) -> int:
-        return len(s.encode("utf-16-le")) // 2
-
-    def test_emoji_chunks_fit_utf16_limit_no_newline(self):
-        limit = 3996  # Telegram safe_limit (4096 - 100)
-        text = "😀" * 5000  # 10000 UTF-16 units, no newline
-        chunks = GatewayStreamConsumer._split_text_chunks(text, limit, len_fn=self._u16)
-        assert chunks
-        for c in chunks:
-            assert self._u16(c) <= limit, self._u16(c)
-        # Round-trips without loss.
-        assert "".join(chunks) == text
-
-    def test_emoji_chunks_fit_when_newline_in_first_half(self):
-        limit = 3996
-        text = "😀" * 100 + "\n" + "😀" * 5000
-        chunks = GatewayStreamConsumer._split_text_chunks(text, limit, len_fn=self._u16)
-        for c in chunks:
-            assert self._u16(c) <= limit, self._u16(c)
-
-    def test_plain_len_behaviour_unchanged(self):
-        # With the default len_fn, behaviour matches the original (limit == budget).
-        text = "a" * 9000
-        chunks = GatewayStreamConsumer._split_text_chunks(text, 4000, len_fn=len)
-        for c in chunks:
-            assert len(c) <= 4000
-        assert "".join(chunks) == text
