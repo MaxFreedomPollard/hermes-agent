@@ -79,3 +79,12 @@ class TestPtyTerminalSize:
 
         assert kwargs["dimensions"] == (30, 120)
         assert (kwargs["env"]["COLUMNS"], kwargs["env"]["LINES"]) == ("120", "30")
+
+    def test_pty_defaults_pagers_to_cat_but_keeps_the_users(self, registry, monkeypatch):
+        """A PTY is a real TTY, so git/man would page and hang on `q`: pagers default to cat."""
+        monkeypatch.delenv("GIT_PAGER", raising=False)
+        monkeypatch.setenv("PAGER", "less -R")
+
+        env = self._spawn_pty(registry)["env"]
+
+        assert (env["GIT_PAGER"], env["PAGER"]) == ("cat", "less -R")
