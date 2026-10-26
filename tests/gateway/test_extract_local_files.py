@@ -12,7 +12,10 @@ from unittest.mock import patch
 
 import pytest
 
-from gateway.platforms.base import BasePlatformAdapter
+from gateway.config import Platform, PlatformConfig
+from gateway.platforms.base import BasePlatformAdapter, SendResult
+from gateway.platforms.event import MessageEvent, MessageType
+from gateway.session import SessionSource
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +221,69 @@ class TestEdgeCases:
             text = f"See /tmp/img.png{suffix} details"
             paths, _ = _extract(text)
             assert len(paths) == 1, f"Failed with suffix '{suffix}'"
+
+
+# ---------------------------------------------------------------------------
+# Reply text: only a path that is attached leaves it
+# ---------------------------------------------------------------------------
+
+class _ReplyAdapter(BasePlatformAdapter):
+
+    def __init__(self):
+        super().__init__(PlatformConfig(enabled=True, token="fake-token"), Platform.DISCORD)
+
+    async def connect(self, *, is_reconnect: bool = False) -> bool:
+        return True
+
+    async def disconnect(self) -> None:
+        return None
+
+    async def send(self, chat_id, content, reply_to=None, metadata=None) -> SendResult:
+        return SendResult(success=True, message_id="msg-1")
+
+    async def send_typing(self, chat_id, metadata=None) -> None:
+        return None
+
+    async def get_chat_info(self, chat_id):
+        return {"id": chat_id}
+
+
+async def _extract_reply(adapter, reply: str):
+    source = SessionSource(platform=Platform.DISCORD, chat_id="111", chat_type="dm")
+    event = MessageEvent(text="hi", message_type=MessageType.TEXT, source=source, message_id="m1")
+    return await adapter._extract_response_content(reply, event, "session-key", is_ephemeral_response=False)
+
+
+class TestUnattachedPathStaysInReply:
+
+    @pytest.mark.asyncio
+    async def test_refused_path_stays_while_attached_path_is_cut(self, tmp_path, monkeypatch):
+        # ~/.config is on the delivery denylist, so the settings file is never attached: cutting it
+        # from the sentence left the user with neither the file nor where it lives.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        settings = tmp_path / ".config" / "app" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text("{}")
+        report = tmp_path / "report.pdf"
+        report.write_bytes(b"%PDF-1.4")
+        reply = f"I set dark mode in ~/.config/app/settings.json. Summary: {report}."
+        out = await _extract_reply(_ReplyAdapter(), reply)
+        assert out.local_files == [str(report.resolve())]
+        assert out.text_content == "I set dark mode in ~/.config/app/settings.json. Summary: ."
+
+    @pytest.mark.asyncio
+    async def test_path_already_delivered_this_session_stays(self, tmp_path, monkeypatch):
+        chart = tmp_path / "chart.png"
+        chart.write_bytes(b"\x89PNG")
+        adapter = _ReplyAdapter()
+
+        async def _history(_session_key):
+            return {str(chart.resolve())}
+
+        monkeypatch.setattr(adapter, "_bounded_history_media_paths_for_session", _history)
+        out = await _extract_reply(adapter, f"Sales rose, as {chart} shows.")
+        assert out.local_files == []
+        assert out.text_content == f"Sales rose, as {chart} shows."
 
 
 if __name__ == "__main__":

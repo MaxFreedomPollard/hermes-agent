@@ -3268,13 +3268,12 @@ class BasePlatformAdapter(ABC):
         return re.sub(r'\n{3,}', '\n\n', _strip_media_tag_directives(text)).rstrip()
 
     @staticmethod
-    def extract_local_files(content: str) -> tuple[list[str], str]:
+    def extract_local_files(content: str, only: Optional[set[str]] = None) -> tuple[list[str], str]:
         """Bare local file paths (absolute, ``~/`` or drive-letter) with deliverable extensions ->
         ``(expanded_paths, cleaned_text)``. Candidates must exist on disk (URLs / hallucinated paths
         ignored); paths inside fenced or inline code are skipped so code samples are never
-        mutilated. Dispatch by type lives in ``gateway/run.py``."""
+        mutilated. ``only`` narrows both to those expanded paths. Dispatch by type lives in ``gateway/run.py``."""
         ext_part = '|'.join(e.lstrip('.') for e in MEDIA_DELIVERY_EXTS)
-        # Lookbehind rejects URL/relative matches (https://…/img.png, ./foo.png).
         # (?<![/:\w.]) prevents matching inside URLs (e.g. https://…/img.png) and relative paths (./foo.png)
         # (?:~/|/)    anchors to absolute or home-relative Unix paths (?:[A-Za-z]:[/\\]) anchors to Windows
         # drive-letter paths (#34632)
@@ -3288,11 +3287,11 @@ class BasePlatformAdapter(ABC):
                 continue
             raw = match.group(0)
             expanded = os.path.expanduser(raw)
-            if os.path.isfile(expanded):
-                unique.setdefault(expanded, raw)
-            else:
+            if not os.path.isfile(expanded):
                 # Most common reason a promised file never arrives — log the gap.
                 logger.info("Skipping bare file path in reply (no file on disk): %s", _log_safe_path(raw))
+            elif only is None or expanded in only:
+                unique.setdefault(expanded, raw)
         if not unique:
             return [], content
         cleaned = content
@@ -4416,24 +4415,25 @@ class BasePlatformAdapter(ABC):
             text_content = _strip_media_directives(text_content).strip()
             if images:
                 logger.info("[%s] extract_images found %d image(s) in response (%d chars)", self.name, len(images), len(response))
-            local_files = []
+            found, attach, stripped = [], {}, text_content  # attach: bare path in the text -> delivery path
             if not is_ephemeral_response:
-                local_files, text_content = self.extract_local_files(text_content)
-                local_files = self.filter_local_delivery_paths(local_files, session_key=session_key)
-        history = (await self._bounded_history_media_paths_for_session(session_key)
-                   if local_files else None)
+                found, stripped = self.extract_local_files(text_content)
+                attach = {p: safe for p in found for safe in self.filter_local_delivery_paths([p], session_key=session_key)}
+        history = await self._bounded_history_media_paths_for_session(session_key) if attach else None
         if history:
-            suppressed = [p for p in local_files if p in history]
+            suppressed = [p for p in attach.values() if p in history]
             if suppressed:
                 logger.info("[%s] Suppressing %d bare local file path(s) already delivered in "
                             "this session: %s", self.name, len(suppressed), suppressed)
-                local_files = [p for p in local_files if p not in history]
-        if local_files:
-            logger.info("[%s] extract_local_files found %d file(s) in response", self.name, len(local_files))
+                attach = {p: safe for p, safe in attach.items() if safe not in history}
+        # Cut only the paths attached below: a refused or already-delivered one stays readable.
+        text_content = stripped if len(attach) == len(found) else self.extract_local_files(text_content, only=set(attach))[1]
+        if attach:
+            logger.info("[%s] extract_local_files found %d file(s) in response", self.name, len(attach))
         # A2 (#29346): extraction can reduce a non-empty response to empty text with no attachment, and the
         # `if text_content` guard below then drops it silently. Recover on every platform (#33842 was
         # Discord-only); the guard avoids duplicating an attachment.
-        if not (text_content or images or local_files or media_files):
+        if not (text_content or images or attach or media_files):
             _recovered = _strip_media_directives(response).strip()
             if _recovered:
                 logger.warning("[%s] response_delivery_recovered: extract pipeline "
@@ -4443,7 +4443,7 @@ class BasePlatformAdapter(ABC):
                 text_content = _recovered
         return _ExtractedResponse(
             text_content=text_content, images=images, media_files=media_files,
-            local_files=local_files, force_document_attachments=force_document, pre_extract=pre_extract)
+            local_files=list(attach.values()), force_document_attachments=force_document, pre_extract=pre_extract)
 
     async def _fire_post_delivery_callback(self, session_key: str, interrupt_event: asyncio.Event) -> None:
         """Run the one-shot post-delivery callback (bounded, errors swallowed). The generation is
