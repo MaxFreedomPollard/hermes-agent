@@ -886,6 +886,17 @@ def cmd_directions(args):
 # Command: timezone
 # ---------------------------------------------------------------------------
 
+def _format_utc_offset(total_seconds):
+    """Format a UTC offset in seconds as ±HH:MM (±HH:MM:SS when needed)."""
+    sign = "-" if total_seconds < 0 else "+"
+    hours, rest = divmod(abs(total_seconds), 3600)
+    minutes, seconds = divmod(rest, 60)
+    offset = f"{sign}{hours:02d}:{minutes:02d}"
+    if seconds:
+        offset = f"{offset}:{seconds:02d}"
+    return offset
+
+
 def cmd_timezone(args):
     """
     Get timezone information for a lat/lon coordinate.
@@ -917,26 +928,16 @@ def cmd_timezone(args):
         if isinstance(tz_data, dict):
             timezone_str = tz_data.get("timeZone")
             current_time = tz_data.get("currentLocalTime")
-            # Build utc_offset from currentUtcOffset if available
-            offset_info = tz_data.get("currentUtcOffset", {})
-            if isinstance(offset_info, dict):
-                oh = offset_info.get("hours", 0)
-                om = abs(offset_info.get("minutes", 0))
-                os_ = offset_info.get("seconds", 0)
-                sign = "+" if oh >= 0 else "-"
-                utc_offset = f"{sign}{abs(oh):02d}:{om:02d}"
-                if os_:
-                    utc_offset = f"{utc_offset}:{os_:02d}"
-            elif tz_data.get("standardUtcOffset"):
-                offset_info2 = tz_data["standardUtcOffset"]
-                if isinstance(offset_info2, dict):
-                    oh = offset_info2.get("hours", 0)
-                    om = abs(offset_info2.get("minutes", 0))
-                    os_ = offset_info2.get("seconds", 0)
-                    sign = "+" if oh >= 0 else "-"
-                    utc_offset = f"{sign}{abs(oh):02d}:{om:02d}"
-                    if os_:
-                        utc_offset = f"{utc_offset}:{os_:02d}"
+            # TimeAPI.io offsets carry the whole offset in "seconds"
+            # (-14400 for EDT) next to the same value in milliseconds,
+            # ticks and nanoseconds; there are no hours/minutes fields.
+            # Prefer the DST-aware current offset over the standard one.
+            for key in ("currentUtcOffset", "standardUtcOffset"):
+                offset_info = tz_data.get(key)
+                seconds = offset_info.get("seconds") if isinstance(offset_info, dict) else None
+                if isinstance(seconds, (int, float)):
+                    utc_offset = _format_utc_offset(int(seconds))
+                    break
             timezone_src = "timeapi.io"
     except (RuntimeError, KeyError, TypeError):
         pass  # API may be down; continue to fallback
