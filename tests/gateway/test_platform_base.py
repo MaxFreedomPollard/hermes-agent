@@ -1250,7 +1250,7 @@ class TestTruncateMessage:
     def test_space_split_does_not_leave_a_leading_space(self):
         """Prose splits on a space; that boundary space must still be dropped.
 
-        This is why the advance is conditional rather than a blanket
+        This is why the advance also strips spaces rather than a blanket
         ``.lstrip("\\n")`` copied from the newline-only chunkers.
         """
         adapter = self._adapter()
@@ -1258,6 +1258,17 @@ class TestTruncateMessage:
         assert len(chunks) > 1
         for i, chunk in enumerate(chunks):
             assert not chunk.startswith(" "), f"chunk {i} starts with a space: {chunk[:12]!r}"
+
+    def test_space_split_before_a_newline_does_not_open_with_a_newline(self):
+        """A space split can land on a trailing space right before a newline (the
+        line after it is one long token). Dropping only the space would open the
+        continuation with that newline, so the advance drops both."""
+        adapter = self._adapter()
+        msg = ("word word word \n" + "x" * 300 + "\n") * 3
+        chunks = adapter.truncate_message(msg, max_length=200)
+        assert len(chunks) > 1
+        for i, chunk in enumerate(chunks[1:], start=1):
+            assert not chunk.startswith("\n"), f"chunk {i} opens with a newline: {chunk[:12]!r}"
 
 
 # ---------------------------------------------------------------------------
